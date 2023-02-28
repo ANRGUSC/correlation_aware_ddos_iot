@@ -1,7 +1,7 @@
 # Correlation Aware DDoS Detection In IoT System
 
 This repository presents the source code for the Correlation-Aware Neural Networks for DDoS Attack Detection In IoT Systems paper.
-
+A preprint of this paper is available with this [link](https://arxiv.org/abs/2302.07982).
 
 ## Instructions for running the codes
 
@@ -10,11 +10,15 @@ The requirements.txt file contains the modules needed to run these scripts and c
 
 ## Project config file
 
-The project config file can be found in [/source_code](https://github.com/ANRGUSC/correlation_aware_ddos_iot/tree/main/source_code). The path to the output directory can be set in this file.
+The project config file can be found in [/source_code](https://github.com/ANRGUSC/correlation_aware_ddos_iot/tree/main/source_code). The path to the dataset, source code, and output directory can be set in this file. Remember to unzip all compressed datasets before running the code.
 
 ## Preprocess the dataset and generate general training dataset
 
 Before running any code, the original dataset need to be unzip in the [/dataset directory](https://github.com/ANRGUSC/correlation_aware_ddos_iot/tree/main/dataset). 
+
+### run_all_pre_process.py
+
+This file automate the pre-processing steps by getting the required inputs and run all pre-processing scripts.
 
 ### clean_dataset.py
 
@@ -101,6 +105,9 @@ Output:
 
 Train different neural network models/architectures and generate results.
 
+### run_all_train_test.py
+
+This script automate the process of training the neural network models and also generating the desired results for all combinations of architectures/NN models. 
 
 ### train_nn.py
 
@@ -118,7 +125,7 @@ Output:
 This script provides analysis like, binary accuracy, recall, F1 score, etc. based on the trained model/architectures.
 
 Input:
-- Training/Testing dataset
+- General training/testing dataset
 - Trained neural network model
 
 Output:
@@ -138,11 +145,6 @@ Input:
 
 Output:
 - Plots of different metrics such as binary accuracy, auc, recall, etc. against k to compare the performance of different model/architecture.
-
-
-## Groups of nodes
-
-The source codes that ends with "groups_of_nodes" in their python file name has the same functionalitiy as the source codes without "groups_of_nodes" except that they do the pre_processing and training on all the nodes instead of just one group of randomly selected nodes.
 
 
 ## Acknowledgement
