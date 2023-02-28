@@ -3,7 +3,7 @@ import sys
 import statistics
 import tensorflow as tf
 # Uncomment the following line for the SHAP analysis
-# tf.compat.v1.disable_v2_behavior()
+tf.compat.v1.disable_v2_behavior()
 import pandas as pd
 import numpy as np
 import sklearn
@@ -101,7 +101,6 @@ def get_dataset_input_output(nn_model, architecture, dataset, selected_nodes_for
             continue
         temp = temp.sort_values(by=['TIME']).reset_index(drop=True)
         df_out = pd.concat([df_out, temp.iloc[time_window - 1:, :]])
-        # df_out = df_out.append(temp.iloc[time_window - 1:, :])
         temp = temp[temp_columns]
         X = temp.iloc[:, 0:-num_labels]
         y = temp.iloc[:, -num_labels:]
@@ -201,7 +200,10 @@ def generate_metrics_evaluation(metrics_evaluation_row, train_predictions_baseli
     row['specificity'] = tn_train / (tn_train + fp_train + sys.float_info.epsilon)
     row['f1score'] = 2 * (row['precision'] * row['recall']) / (
                 row['precision'] + row['recall'] + sys.float_info.epsilon)
-    row['auc'] = roc_auc_score(y_train, train_predictions_baseline)
+    try:
+        row['auc'] = roc_auc_score(y_train, train_predictions_baseline, labels=[0, 1])
+    except ValueError:
+        row['auc'] = 1
 
     y_pred_test = (test_predictions_baseline > threshold).astype(int)
     tn_test, fp_test, fn_test, tp_test = confusion_matrix(y_test, y_pred_test).ravel()
@@ -215,7 +217,10 @@ def generate_metrics_evaluation(metrics_evaluation_row, train_predictions_baseli
     row['val_specificity'] = tn_test / (tn_test + fp_test + sys.float_info.epsilon)
     row['val_f1score'] = 2 * (row['val_precision'] * row['val_recall']) / (
                 row['val_precision'] + row['val_recall'] + sys.float_info.epsilon)
-    row['val_auc'] = roc_auc_score(y_test, test_predictions_baseline)
+    try:
+        row['val_auc'] = roc_auc_score(y_test, test_predictions_baseline, labels=[0, 1])
+    except ValueError:
+        row['val_auc'] = 1
 
     return row
 
@@ -277,28 +282,39 @@ def generate_roc_clean_data(train_roc_data, test_roc_data, metric, mode, output_
     roc_data.to_csv(output_path_mean_roc, index=False)
 
 
-def plot_feature_analysis(nn_model, loaded_model, node, k, feature_columns, X_train, X_test):
+def generate_shap_values(nn_model, loaded_model, node, k, feature_columns, time_window, X_train, X_test):
+    shap_values_df = pd.DataFrame()
+    X_test_df = pd.DataFrame()
     feature_columns.remove('ATTACKED')
+    if nn_model == 'dense' or nn_model == 'aen':
+        feature_columns_original = feature_columns.copy()
+        for index in range(1, time_window):
+            feature_columns_tmp = [i + '_' + str(index) for i in feature_columns_original]
+            feature_columns.extend(feature_columns_tmp)
     X_train = np.array(random.choices(X_train, k=1000))
     X_test = np.array(random.choices(X_test, k=1000))
     explainer = shap.DeepExplainer(loaded_model, X_train)
     shap_values = explainer.shap_values(X_test)
     shap_values = np.array(shap_values[0])
-    shap_values_df = pd.DataFrame()
-    X_test_df = pd.DataFrame()
     for index, shap_value in enumerate(shap_values):
+        if nn_model == 'dense' or nn_model == 'aen':
+            shap_value = shap_value.reshape(1, len(shap_value))
         tmp_df = pd.DataFrame(shap_value, columns=feature_columns)
         tmp_df['sample'] = index
         tmp_df['node'] = node
         tmp_df['k'] = k
         shap_values_df = pd.concat([shap_values_df, tmp_df])
     for index, x_t in enumerate(X_test):
+        if nn_model == 'dense' or nn_model == 'aen':
+            x_t = x_t.reshape(1, len(x_t))
         tmp_df = pd.DataFrame(x_t, columns=feature_columns)
         tmp_df['sample'] = index
         tmp_df['node'] = node
         tmp_df['k'] = k
         X_test_df = pd.concat([X_test_df, tmp_df])
 
+    X_test_df = X_test_df.reset_index(drop=True)
+    shap_values_df = shap_values_df.reset_index(drop=True)
     return X_test_df, shap_values_df
 
 
@@ -333,7 +349,6 @@ def generate_report_data(nn_model, architecture, train_dataset, test_dataset, mo
     k_list = list(train_dataset['ATTACK_PARAMETER'].unique())
     k_list = np.round(k_list, 2)
     thresholds = {}
-    # k_list = k_list[:2]
     for k in k_list:
         for node in nodes:
             tf.keras.backend.clear_session()
@@ -387,9 +402,11 @@ def generate_report_data(nn_model, architecture, train_dataset, test_dataset, mo
             attack_vs_time_test_df = pd.concat([attack_vs_time_test_df, tmp_a_vs_t_test])
 
             # Feature importance analysis
-            # tmp_shap_X_test_df, tmp_shap_values_df = plot_feature_analysis(nn_model, model, node, k, feature_columns, X_train, X_test)
-            # shap_x_test_df = pd.concat([shap_x_test_df, tmp_shap_X_test_df])
-            # shap_values_df = pd.concat([shap_values_df, tmp_shap_values_df])
+            if nn_model != 'trans':
+                tmp_shap_X_test_df, tmp_shap_values_df = generate_shap_values(nn_model, model, node, k, feature_columns,
+                                                                              time_window, X_train, X_test)
+                shap_x_test_df = pd.concat([shap_x_test_df, tmp_shap_X_test_df])
+                shap_values_df = pd.concat([shap_values_df, tmp_shap_values_df])
 
     # General metrics evaluation
     output_path_metrics_evaluation_report = output_path + '/metrics_evaluation/data/general_report_' + metric + '_' + mode + '.csv'
@@ -418,18 +435,25 @@ def generate_report_data(nn_model, architecture, train_dataset, test_dataset, mo
                                    metric + '_' + mode + '.csv', index=False)
     attack_vs_time_test_df.to_csv(attack_prediction_vs_time_output_path + 'attack_prediction_vs_time_test_data_' +
                                   metric + '_' + mode + '.csv', index=False)
+    # Attack detection stats - NOTE: depended on running attack prediction vs time
+    input_dataset_path = attack_prediction_vs_time_output_path + 'attack_prediction_vs_time_test_data_' + metric + '_' + mode + '.csv'
+    attack_detection_stats_output_path = output_path + '/attack_detection_stats/attack_detection_stats_test_data.txt'
+    prepare_output_directory(attack_detection_stats_output_path)
+    generate_attack_detection_stats(input_dataset_path, attack_detection_stats_output_path)
 
     # Feature importance analysis
-    # shap_output_path = output_path + '/shap/data/'
-    # prepare_output_directory(shap_output_path)
-    # shap_x_test_df.to_csv(shap_output_path + 'shap_x_test_df_' + metric + '_' + mode + '.csv', index=False)
-    # shap_values_df.to_csv(shap_output_path + 'shap_values_df_' + metric + '_' + mode + '.csv', index=False)
-    # main_plot_shap_values()
+    if nn_model != 'trans':
+        shap_output_path = output_path + '/shap/data/'
+        prepare_output_directory(shap_output_path)
+        shap_x_test_df.to_csv(shap_output_path + 'shap_x_test_df_' + metric + '_' + mode + '.csv', index=False)
+        shap_values_df.to_csv(shap_output_path + 'shap_values_df_' + metric + '_' + mode + '.csv', index=False)
+        input_data_path = output_path
+        main_plot_shap_values(input_data_path, metric, mode)
     # sys.exit()
 
 
 def main_general_report(nn_model, architecture, metadata_metric, metric, mode, train_dataset_path, test_dataset_path,
-                        time_window, use_time_hour, use_onehot, num_labels, run_number):
+                        time_window, use_time_hour, use_onehot, num_labels, run_number, group_number):
     '''
     The main function for calling the generate_general_report function
     Args:
@@ -440,18 +464,18 @@ def main_general_report(nn_model, architecture, metadata_metric, metric, mode, t
     Returns:
         --
     '''
-    model_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/' + 'metadata_' + metadata_metric + '/' + \
+    model_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/group_' + str(group_number) + '/metadata_' + metadata_metric + '/' + \
                  nn_model + '/' + architecture + '/' + 'run_' + str(run_number) + '/saved_model/'
     train_dataset = load_dataset(train_dataset_path)
     test_dataset = load_dataset(test_dataset_path)
 
-    output_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/' + 'metadata_' + metadata_metric + '/' + \
+    output_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/group_' + str(group_number) + '/metadata_' + metadata_metric + '/' + \
                   nn_model + '/' + architecture + '/' + 'run_' + str(run_number) + '/report/'
     generate_report_data(nn_model, architecture, train_dataset, test_dataset, model_path, time_window,
                          use_time_hour, use_onehot, num_labels, metric, mode, output_path)
 
 
-def main_final_general_report(nn_model, architecture, metadata_metric, metric, mode):
+def main_final_general_report(nn_model, architecture, metadata_metric, metric, mode, group_number):
     '''
     The main function for calling the generate_general_report function
     Args:
@@ -464,7 +488,7 @@ def main_final_general_report(nn_model, architecture, metadata_metric, metric, m
     '''
     mean_report_final = pd.DataFrame()
     roc_report_final = pd.DataFrame()
-    all_runs_report_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/' + 'metadata_' + metadata_metric + '/' + \
+    all_runs_report_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/group_' + str(group_number) + '/metadata_' + metadata_metric + '/' + \
                            nn_model + '/' + architecture + '/'
     os.system('rm -rf ' + all_runs_report_path + 'final_report/')
     for run_report_path in glob.glob(all_runs_report_path + '*'):
@@ -489,7 +513,6 @@ def main_final_general_report(nn_model, architecture, metadata_metric, metric, m
     roc_report_final_path = final_report_path + 'roc/data/roc_mean_report_' + metric + '_' + mode + '.csv'
     prepare_output_directory(roc_report_final_path)
     roc_report_final.to_csv(roc_report_final_path, index=False)
-
 
 
 def plot_metric_vs_attack_parameter(mean_report, output_path):
@@ -518,7 +541,7 @@ def plot_metric_vs_attack_parameter(mean_report, output_path):
         plt.savefig(output_path + metric + '.png')
 
 
-def main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode, run_number):
+def main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode, run_number, group_number):
     '''
     The main function for calling the metric_vs_attack_parameter function
     Args:
@@ -529,10 +552,10 @@ def main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric
         --
     '''
     if run_number == -1:
-        general_report_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/' + 'metadata_' + metadata_metric + '/' + \
+        general_report_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/group_' + str(group_number) + '/metadata_' + metadata_metric + '/' + \
                               nn_model + '/' + architecture + '/final_report/metrics_evaluation/'
     else:
-        general_report_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/' + 'metadata_' + metadata_metric + '/' + \
+        general_report_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/group_' + str(group_number) + '/metadata_' + metadata_metric + '/' + \
                               nn_model + '/' + architecture + '/' + 'run_' + str(
             run_number) + '/report/metrics_evaluation/'
 
@@ -543,9 +566,6 @@ def main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric
     prepare_output_directory(output_path)
 
     plot_metric_vs_attack_parameter(mean_report, output_path)
-
-
-
 
 
 def generate_attack_prediction_vs_time_data(train_predictions_baseline, test_predictions_baseline, threshold,
@@ -663,7 +683,7 @@ def plot_attack_prediction_vs_time(train_result_path, test_result_path, train_ou
                     fig.savefig(output_path)
 
 
-def main_plot_attack_prediction_vs_time(nn_model, architecture, metadata_metric, metric, mode, run_number):
+def main_plot_attack_prediction_vs_time(nn_model, architecture, metadata_metric, metric, mode, run_number, group_number):
     '''
     The main function for calling the plot_attack_prediction_vs_time function
     Args:
@@ -674,10 +694,10 @@ def main_plot_attack_prediction_vs_time(nn_model, architecture, metadata_metric,
         --
     '''
     if run_number == -1:
-        attack_prediction_vs_time_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/' + 'metadata_' + metadata_metric + '/' + \
+        attack_prediction_vs_time_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/group_' + str(group_number) + '/metadata_' + metadata_metric + '/' + \
                                          nn_model + '/' + architecture + '/final_report/attack_prediction_vs_time/'
     else:
-        attack_prediction_vs_time_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/' + 'metadata_' + metadata_metric + '/' + \
+        attack_prediction_vs_time_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/group_' + str(group_number) + '/metadata_' + metadata_metric + '/' + \
                                          nn_model + '/' + architecture + '/' + 'run_' + str(run_number) + \
                                          '/report/attack_prediction_vs_time/'
 
@@ -692,7 +712,6 @@ def main_plot_attack_prediction_vs_time(nn_model, architecture, metadata_metric,
     prepare_output_directory(test_output_path)
 
     plot_attack_prediction_vs_time(train_result_path, test_result_path, train_output_path, test_output_path)
-
 
 
 def generate_attack_detection_stats(dataset_path, output_path):
@@ -752,13 +771,6 @@ def generate_attack_detection_stats(dataset_path, output_path):
     fout.close()
 
 
-def main_generate_attack_detection_stats():
-    dataset_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/metadata_NOT_USED/lstm/multiple_models_with_correlation/run_0/report/attack_prediction_vs_time/data/attack_prediction_vs_time_test_data_val_binary_accuracy_max.csv'
-    output_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/metadata_NOT_USED/lstm/multiple_models_with_correlation/run_0/report/attack_detection_stats/attack_detection_stats.txt'
-    prepare_output_directory(output_path)
-    generate_attack_detection_stats(dataset_path, output_path)
-
-
 def plot_shap_values(input_data_path, metric, mode):
     shap_x_test_df_path = input_data_path + '/shap/data/shap_x_test_df_' + metric + '_' + mode + '.csv'
     shap_values_df_path = input_data_path + '/shap/data/shap_values_df_' + metric + '_' + mode + '.csv'
@@ -810,10 +822,7 @@ def save_most_important_features(input_data_path, metric, mode):
     feature_importance_df.to_csv(output_path, index=False)
 
 
-def main_plot_shap_values():
-    input_data_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/metadata_NOT_USED/lstm/multiple_models_with_correlation/run_0/report'
-    metric = 'val_binary_accuracy'
-    mode = 'max'
+def main_plot_shap_values(input_data_path, metric, mode):
     plot_shap_values(input_data_path, metric, mode)
     save_most_important_features(input_data_path, metric, mode)
 
@@ -929,18 +938,20 @@ def plot_metric_vs_attack_property(mean_report_path, output_path, attack_propert
 
 def main_generate_attack_properties_analysis(nn_model, architecture, metadata_metric, metric, mode, train_dataset_path,
                                              test_dataset_path, time_window, use_time_hour, use_onehot, num_labels,
-                                             run_number):
-    model_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/' + 'metadata_' + metadata_metric + '/' + \
+                                             run_number, group_number):
+    model_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/group_' + str(group_number) + '/metadata_' + metadata_metric + '/' + \
                  nn_model + '/' + architecture + '/' + 'run_' + str(run_number) + '/saved_model/'
     train_dataset = load_dataset(train_dataset_path)
     test_dataset = load_dataset(test_dataset_path)
 
-    output_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/' + 'metadata_' + metadata_metric + '/' + \
+    output_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/group_' + str(group_number) + '/metadata_' + metadata_metric + '/' + \
                   nn_model + '/' + architecture + '/' + 'run_' + str(run_number) + '/report/'
     attack_property_name_list = {'ATTACK_RATIO': 'Ratio of The Nodes Under Attack',
                                  'ATTACK_PARAMETER': 'Attack Packet Volume Distribution (k)',
                                  'ATTACK_DURATION': 'Attack Duration',
                                  'ATTACK_START_TIME': 'Attack Start Time'}
+    # attack_property_name_list = {
+    #                              'ATTACK_START_TIME': 'Attack Start Time'}
 
     for attack_property_name, attack_property_legend in attack_property_name_list.items():
         generate_attack_properties_analysis_data(attack_property_name, nn_model, architecture, train_dataset, test_dataset,
@@ -952,8 +963,6 @@ def main_generate_attack_properties_analysis(nn_model, architecture, metadata_me
         prepare_output_directory(plot_output_path)
         plot_metric_vs_attack_property(mean_report_path, plot_output_path, attack_property_name, attack_property_legend)
         # sys.exit()
-
-
 
 
 def generate_metrics_evaluation_for_all_attack_properties(attack_ratio, attack_duration, attack_start_time, k , node,
@@ -1042,12 +1051,15 @@ def generate_all_attack_properties_analysis_data(nn_model, architecture, train_d
             thresholds[node] = find_best_threshold(model, nn_model, architecture, node, train_dataset,
                                                    selected_nodes_for_correlation, num_labels,
                                                    time_window, scaler, use_time_hour, use_onehot)
-
+            # thresholds[node] = 0.5
         train_dataset_node = pd.DataFrame()
         test_dataset_node = pd.DataFrame()
         if architecture == 'multiple_models_with_correlation' or architecture == 'multiple_models_without_correlation':
             train_dataset_node = train_dataset.loc[(train_dataset['NODE'] == node)]
             test_dataset_node = test_dataset.loc[(test_dataset['NODE'] == node)]
+        elif architecture == 'one_model_with_correlation' or architecture == 'one_model_without_correlation':
+            train_dataset_node = train_dataset
+            test_dataset_node = test_dataset
         for attack_ratio in attack_ratios_list:
             train_dataset_attack_ratio = train_dataset_node.loc[(train_dataset_node['ATTACK_RATIO'] == attack_ratio)]
             test_dataset_attack_ratio = test_dataset_node.loc[(test_dataset_node['ATTACK_RATIO'] == attack_ratio)]
@@ -1105,6 +1117,16 @@ def plot_metric_vs_specific_attack_property_selection(report_path, output_path):
     metric_legends_list = {'binary_accuracy': 'Binary Accuracy', 'recall': 'Recall', 'precision': 'Precision',
                            'specificity': 'Specificity', 'f1score': 'F1 Score', 'auc': 'Area Under Curve (AUC)'}
     data = data.loc[data['val_f1score']>0]
+    # data['val_f1score'] = data['val_f1score'].replace(0, 1)
+
+    # data = data.groupby(['k', 'attack_ratio', 'attack_duration', 'attack_start_time']).sum().reset_index()
+    # data['val_recall'] = data['val_tp'] / (data['val_tp'] + data['val_fn'])
+    # data['val_binary_accuracy'] = (data['val_tp'] + data['val_tn']) / (data['val_tn'] + data['val_fp'] + data['val_fn'] + data['val_tp'] )
+    # data['val_recall'] = data['val_tp'] / (data['val_tp'] + data['val_fn'] )
+    # data['val_precision'] = data['val_tp'] / (data['val_tp'] + data['val_fp'] )
+    # data['val_specificity'] = data['val_tn'] / (data['val_tn'] + data['val_fp'] )
+    # data['val_f1score'] = 2 * (data['val_precision'] * data['val_recall']) / (
+    #             data['val_precision'] + data['val_recall'] )
 
     data = data.groupby(['k', 'attack_ratio', 'attack_duration']).mean().reset_index()
     for metric, metric_legend in metric_legends_list.items():
@@ -1118,7 +1140,7 @@ def plot_metric_vs_specific_attack_property_selection(report_path, output_path):
         plt.plot(plot_data_2['attack_ratio'], plot_data_2['val_' + metric], color=colors[1], linestyle=line_styles[1], marker=markers[1], label=r'$k=0$, $a_d=16$ hours')
         plt.plot(plot_data_3['attack_ratio'], plot_data_3['val_' + metric], color=colors[2], linestyle=line_styles[1], marker=markers[2], label=r'$k=1$, $a_d=4$ hours')
         plt.plot(plot_data_4['attack_ratio'], plot_data_4['val_' + metric], color=colors[3], linestyle=line_styles[1], marker=markers[3], label=r'$k=1$, $a_d=16$ hours')
-        plt.xlabel(r'Ratio of The Nodes Under Attack ($a_r$)')
+        plt.xlabel(r'a_r')
         plt.ylabel(metric_legend)
         plt.legend()
         plt.savefig(output_path + metric + '.png')
@@ -1126,27 +1148,27 @@ def plot_metric_vs_specific_attack_property_selection(report_path, output_path):
 
 def main_generate_all_attack_properties_analysis_data(nn_model, architecture, metadata_metric, metric, mode, train_dataset_path,
                                              test_dataset_path, time_window, use_time_hour, use_onehot, num_labels,
-                                             run_number):
-    model_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/' + 'metadata_' + metadata_metric + '/' + \
+                                             run_number, group_number):
+    model_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/group_' + str(group_number) + '/metadata_' + metadata_metric + '/' + \
                  nn_model + '/' + architecture + '/' + 'run_' + str(run_number) + '/saved_model/'
     train_dataset = load_dataset(train_dataset_path)
     test_dataset = load_dataset(test_dataset_path)
 
-    output_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/' + 'metadata_' + metadata_metric + '/' + \
+    output_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/group_' + str(group_number) + '/metadata_' + metadata_metric + '/' + \
                   nn_model + '/' + architecture + '/' + 'run_' + str(run_number) + '/report/'
 
     generate_all_attack_properties_analysis_data(nn_model, architecture, train_dataset, test_dataset,
                                              model_path, time_window,
                                              use_time_hour, use_onehot, num_labels, metric, mode, output_path)
 
-    report_path_metrics_evaluation = output_path + 'attack_property_evaluation/data/' + \
+    report_path_metrics_evaluation = output_path + '/attack_property_evaluation/data/' + \
                                             'general_report_all_attack_properties_' + metric + '_' + mode + '.csv'
     plot_output_path = output_path + '/attack_property_evaluation/plot/'
     prepare_output_directory(plot_output_path)
     plot_metric_vs_specific_attack_property_selection(report_path_metrics_evaluation, plot_output_path)
 
 
-def main():
+def main_generate_results(group_number):
     seed = 1
     tf.random.set_seed(seed)
     random.seed(seed)
@@ -1155,11 +1177,12 @@ def main():
     mode = 'max'
     use_time_hour = False
     use_onehot = True
+    upsample_enabled = False
     num_labels = 1
     time_window = 10
     num_random_trains = 10
-    train_dataset_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/train_data/train_data.csv'
-    test_dataset_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/test_data/test_data.csv'
+    train_dataset_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/group_' + str(group_number) + '/train_data/train_data.csv'
+    test_dataset_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/group_' + str(group_number) + '/test_data/test_data.csv'
     print(sys.argv)
 
     if len(sys.argv) > 1:
@@ -1168,29 +1191,44 @@ def main():
         metadata_metric = sys.argv[3]
         run_number = int(sys.argv[4])
         run_final_report = sys.argv[5] == 'True'
+        use_time_hour = sys.argv[6] == 'True'
+        use_onehot = sys.argv[7] == 'True'
+        upsample_enabled = sys.argv[8] == 'True'
+        num_labels = int(sys.argv[9])
+        time_window = int(sys.argv[10])
 
         if run_number == -1:
-            main_final_general_report(nn_model, architecture, metadata_metric, metric, mode)
-            main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode, -1)
+            main_final_general_report(nn_model, architecture, metadata_metric, metric, mode, group_number)
+            main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode, -1, group_number)
+            # print('hello')
         else:
             main_general_report(nn_model, architecture, metadata_metric, metric, mode, train_dataset_path,
-                                test_dataset_path, time_window, use_time_hour, use_onehot, num_labels, run_number)
-            main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode, run_number)
-            main_plot_attack_prediction_vs_time(nn_model, architecture, metadata_metric, metric, mode, run_number)
+                                test_dataset_path, time_window, use_time_hour, use_onehot, num_labels, run_number, group_number)
+            main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode, run_number, group_number)
+            main_plot_attack_prediction_vs_time(nn_model, architecture, metadata_metric, metric, mode, run_number, group_number)
 
             if run_final_report:
-                main_final_general_report(nn_model, architecture, metadata_metric, metric, mode)
-                main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode, -1)
+                main_final_general_report(nn_model, architecture, metadata_metric, metric, mode, group_number)
+                main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode, -1, group_number)
                 # print('hello')
+            main_generate_attack_properties_analysis(nn_model, architecture, metadata_metric, metric, mode,
+                                                     train_dataset_path, test_dataset_path, time_window,
+                                                     use_time_hour, use_onehot, num_labels, run_number, group_number)
+            main_generate_all_attack_properties_analysis_data(nn_model, architecture, metadata_metric, metric, mode,
+                                                              train_dataset_path,
+                                                              test_dataset_path, time_window, use_time_hour,
+                                                              use_onehot, num_labels,
+                                                              run_number, group_number)
 
     else:
         nn_model_list = ['dense', 'cnn', 'lstm', 'aen', 'trans']
-        architecture_list = ['multiple_models_with_correlation',
-                             'multiple_models_without_correlation',
+        architecture_list = [
                              'one_model_with_correlation',
+                             'multiple_models_with_correlation',
+                             'multiple_models_without_correlation',
                              'one_model_without_correlation']
-        nn_model_list = ['lstm']
-        architecture_list = ['multiple_models_with_correlation']
+        nn_model_list = ['dense']
+        architecture_list = ['one_model_with_correlation']
 
         # Run 1
         metadata_metric = 'NOT_USED'
@@ -1198,24 +1236,25 @@ def main():
         for nn_model in nn_model_list:
             for architecture in architecture_list:
                 main_general_report(nn_model, architecture, metadata_metric, metric, mode, train_dataset_path,
-                                    test_dataset_path, time_window, use_time_hour, use_onehot, num_labels, run_number)
-                main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode, run_number)
-                main_plot_attack_prediction_vs_time(nn_model, architecture, metadata_metric, metric, mode, run_number)
-                main_final_general_report(nn_model, architecture, metadata_metric, metric, mode)
-                main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode, -1)
+                                    test_dataset_path, time_window, use_time_hour, use_onehot, num_labels, run_number, group_number)
+                main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode, run_number, group_number)
+                main_plot_attack_prediction_vs_time(nn_model, architecture, metadata_metric, metric, mode, run_number, group_number)
+                main_final_general_report(nn_model, architecture, metadata_metric, metric, mode, group_number)
+                main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode, -1, group_number)
                 main_generate_attack_properties_analysis(nn_model, architecture, metadata_metric, metric, mode,
-                                                         train_dataset_path, test_dataset_path, time_window,
-                                                         use_time_hour, use_onehot, num_labels, run_number)
+                                                     train_dataset_path, test_dataset_path, time_window,
+                                                     use_time_hour, use_onehot, num_labels, run_number, group_number)
                 main_generate_all_attack_properties_analysis_data(nn_model, architecture, metadata_metric, metric, mode,
-                                                                  train_dataset_path,
-                                                                  test_dataset_path, time_window, use_time_hour,
-                                                                  use_onehot, num_labels,
-                                                                  run_number)
+                                                              train_dataset_path,
+                                                              test_dataset_path, time_window, use_time_hour,
+                                                              use_onehot, num_labels,
+                                                              run_number, group_number)
 
         # Run 2
         nn_model_list = ['lstm']
         architecture_list = ['multiple_models_with_correlation']
-        metadata_metric_list = ['DISTANCE', 'CORRELATION', 'RANDOM', 'SHAP']
+        metadata_metric_list = ['DISTANCE', 'CORRELATION', 'RANDOM']
+        metadata_metric_list = ['Random']
         for metadata_metric in metadata_metric_list:
             for nn_model in nn_model_list:
                 for architecture in architecture_list:
@@ -1223,25 +1262,28 @@ def main():
                         run_number = 0
                         main_general_report(nn_model, architecture, metadata_metric, metric, mode, train_dataset_path,
                                             test_dataset_path, time_window, use_time_hour, use_onehot, num_labels,
-                                            run_number)
+                                            run_number, group_number)
                         main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode,
-                                                             run_number)
+                                                             run_number, group_number)
                         main_plot_attack_prediction_vs_time(nn_model, architecture, metadata_metric, metric, mode,
-                                                            run_number)
+                                                            run_number, group_number)
                     else:
                         for run_number in range(num_random_trains):
                             main_general_report(nn_model, architecture, metadata_metric, metric, mode,
                                                 train_dataset_path, test_dataset_path, time_window, use_time_hour,
-                                                use_onehot, num_labels, run_number)
+                                                use_onehot, num_labels, run_number, group_number)
                             main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode,
-                                                                 run_number)
+                                                                 run_number, group_number)
                             main_plot_attack_prediction_vs_time(nn_model, architecture, metadata_metric, metric, mode,
-                                                                run_number)
-                    main_final_general_report(nn_model, architecture, metadata_metric, metric, mode)
-                    main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode, -1)
+                                                                run_number, group_number)
+                    main_final_general_report(nn_model, architecture, metadata_metric, metric, mode, group_number)
+                    main_plot_metric_vs_attack_parameter(nn_model, architecture, metadata_metric, metric, mode, -1, group_number)
+
+
+def main(num_groups):
+    for group_number in range(num_groups):
+        main_generate_results(group_number)
 
 
 if __name__ == '__main__':
-    main()
-    main_generate_attack_detection_stats()
-    main_plot_shap_values()
+    main(CONFIG.NUM_GROUPS)

@@ -89,21 +89,7 @@ def combine_data(num_days, input_path, output_path):
     combined_data.to_csv(output_path, index=False)
 
 
-
-    # training_data = pd.DataFrame()
-    # for fname in glob.glob(input_path):
-    #     print(fname)
-    #     temp = pd.read_csv(fname)
-    #     temp['TIME'] = pd.to_datetime(temp['TIME'])
-    #     begin_date = temp['TIME'][0] + timedelta(days=2)
-    #     end_date = temp['TIME'][0] + timedelta(days=2 + num_days)
-    #     temp = temp.loc[(temp['TIME'] >= begin_date) & (temp['TIME'] < end_date)]
-    #     temp = add_other_nodes_packets(temp)
-    #     training_data = training_data.append(temp)
-    # training_data.to_csv(output_path, index=False)
-
-
-def main_combine_data(data_type, num_days):
+def main_combine_data(group_number, data_type, num_days):
     '''The main function to be used for calling  combine_data function.
 
     Keyword arguments:
@@ -111,25 +97,34 @@ def main_combine_data(data_type, num_days):
                 higher ratio attacked nodes contain the lower ratio attacked nodes.
     '''
     if data_type == 'train':
-        input_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/attacked_data/train/*.csv'
-        output_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/train_data/train_data.csv'
+        input_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/group_' + str(group_number) + '/attacked_data/train/*.csv'
+        output_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/group_' + str(group_number) + '/train_data/train_data.csv'
     elif data_type == 'validation':
-        input_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/attacked_data/validation/*.csv'
-        output_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/validation_data/validation_data.csv'
+        input_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/group_' + str(group_number) + '/attacked_data/validation/*.csv'
+        output_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/group_' + str(group_number) + '/validation_data/validation_data.csv'
     elif data_type == 'test':
-        input_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/attacked_data/test/*.csv'
-        output_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/test_data/test_data.csv'
+        input_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/group_' + str(group_number) + '/attacked_data/test/*.csv'
+        output_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/group_' + str(group_number) + '/test_data/test_data.csv'
 
     prepare_output_directory(output_path)
     combine_data(num_days, input_path, output_path)
 
 
-if __name__ == '__main__':
-
-    num_train_days = 4
+def main():
+    num_train_days = 1
     num_validation_days = 1
-    num_test_days = 3
+    num_test_days = 1
+    if len(sys.argv) > 1:
+        num_train_days = int(sys.argv[1])
+        num_validation_days = int(sys.argv[2])
+        num_test_days = int(sys.argv[3])
 
-    main_combine_data('train', num_train_days)
-    main_combine_data('validation', num_validation_days)
-    main_combine_data('test', num_test_days)
+
+    for group_number in range(CONFIG.NUM_GROUPS):
+        main_combine_data(group_number, 'train', num_train_days)
+        main_combine_data(group_number, 'validation', num_validation_days)
+        main_combine_data(group_number, 'test', num_test_days)
+
+
+if __name__ == '__main__':
+    main()

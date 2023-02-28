@@ -110,7 +110,7 @@ def main():
 
     for num_nodes in num_nodes_list:
         benign_dataset_path = CONFIG.OUTPUT_DIRECTORY + \
-                              'pre_process/Output/benign_data/benign_data_2021-01-02 00:00:00_2021-02-01 23:59:58_time_step_' + \
+                              'pre_process/Output/group_0/benign_data/benign_data_2021-01-02 00:00:00_2021-02-01 23:59:58_time_step_' + \
                               str(time_step) + '_num_ids_' + str(num_nodes) + '.csv'
         benign_dataset_path_list.append(benign_dataset_path)
     output_path = CONFIG.OUTPUT_DIRECTORY + 'stats/active_nodes_percentage/all/active_nodes_percentage_comparison.png'

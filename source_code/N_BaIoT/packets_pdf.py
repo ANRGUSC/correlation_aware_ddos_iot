@@ -13,30 +13,29 @@ import tensorflow_probability as tfp
 
 
 def prepare_output_directory(output_path):
-    """Prepare the output directory by deleting the old files and create an empty directory.
+    '''Prepare the output directory by deleting the old files and create an empty directory.
 
     Keyword arguments:
     output_path -- path to the output directory
-    """
+    '''
     dir_name = str(os.path.dirname(output_path))
     #os.system('rm -rf ' + dir_name)
     os.system('mkdir -p ' + dir_name)
 
 
 def load_dataset(path):
-    """Load the benign/attacked dataset
+    '''Load the benign/attacked dataset
 
     Keyword arguments:
     path -- path to the dataset
-    """
+    '''
     data = pd.read_csv(path)
     return data
 
 
-def main_fit():
-    """Try different distributions to find the best fit for benign/attacked dataset
-    """
-    benign_data_path = CONFIG.DATASET_DIRECTORY + 'N_BaIoT/SimpleHome_XCS7_1003_WHT_Security_Camera_benign_aggregation_Source-IP_time_window_10-sec_stat_Number.csv'
+def main_fit(benign_data_path):
+    '''Try different distributions to find the best fit for benign/attacked dataset
+    '''
     benign_data = load_dataset(benign_data_path)
 
     attacked_data_path = CONFIG.DATASET_DIRECTORY + 'N_BaIoT/SimpleHome_XCS7_1003_WHT_Security_Camera_mirai_attack_udp_aggregation_Source-IP_time_window_10-sec_stat_Number.csv'
@@ -44,18 +43,20 @@ def main_fit():
 
     f = Fitter(list(benign_data['PACKET'].values))
     f.fit()
+    #print(f.summary(Nbest=80))
 
 
     g = Fitter(list(attacked_data['PACKET'].values))
     g.fit()
+    #print(g.summary(Nbest=80))
 
     f_df = f.summary(Nbest=100)
-    output_path = CONFIG.OUTPUT_DIRECTORY + 'N_BaIoT/Output/Dists/benign_dists.csv'
+    output_path = CONFIG.OUTPUT_DIRECTORY + 'N_BaIoT/Dists/benign_dists.csv'
     prepare_output_directory(output_path)
     f_df.to_csv(output_path)
 
     g_df = g.summary(Nbest=100)
-    output_path = CONFIG.OUTPUT_DIRECTORY + 'N_BaIoT/Output/Dists/attack_dists.csv'
+    output_path = CONFIG.OUTPUT_DIRECTORY + 'N_BaIoT/Dists/attack_dists.csv'
     prepare_output_directory(output_path)
     g_df.to_csv(output_path)
 
@@ -66,11 +67,8 @@ def main_fit():
 
 
 def main_fit_cauchy(benign_data_path):
-    """Fit the Cauchy distribution to the benign/attacked dataset
-
-    Keyword arguments:
-    benign_data_path -- path to the benign dataset
-    """
+    '''Fit the Cauchy distribution to the benign/attacked dataset
+    '''
     benign_data = load_dataset(benign_data_path)
 
     attacked_data_path = CONFIG.DATASET_DIRECTORY + 'N_BaIoT/SimpleHome_XCS7_1003_WHT_Security_Camera_mirai_attack_udp_aggregation_Source-IP_time_window_10-sec_stat_Number.csv'
@@ -97,12 +95,8 @@ def main_fit_cauchy(benign_data_path):
 
 
 def main_plot_pdf(benign_data_path, output_path):
-    """Plot the fitted truncated Cauchy distribution pdf
-
-    Keyword arguments:
-    benign_data_path -- path to the benign dataset
-    output_path -- path to the output directory
-    """
+    '''Plot the fitted truncated Cauchy distribution pdf
+    '''
     benign_data = load_dataset(benign_data_path)
 
     plt.clf()
@@ -123,6 +117,9 @@ def main_plot_pdf(benign_data_path, output_path):
                                                                          high=benign_data['PACKET'].max()*(1+k))
 
         temp = packet_dist.sample([100000000])
+        #temp = np.array(cauchy.rvs(loc=benign_cauchy[0]*(1+k), scale=benign_cauchy[1]*(1+k), size=1000000))
+        #temp[temp<0] = 0
+        #temp[temp>max_value] = max_value*(1+k)
         count, bins_count = np.histogram(temp, bins=num_bins)
         pdf = count / sum(count)
         plt.plot(bins_count[1:], pdf, color=colors[i], label='k = ' + str(k))
@@ -130,18 +127,15 @@ def main_plot_pdf(benign_data_path, output_path):
     plt.xlabel('Packets Volume')
     plt.ylabel('PDF')
     plt.semilogx()
+    #plt.semilogy()
     plt.legend()
     plt.savefig(output_path)
     # plt.show()
 
 
 def main_plot_ccdf(benign_data_path, output_path):
-    """Plot the fitted truncated Cauchy distribution ccdf
-
-    Keyword arguments:
-    benign_data_path -- path to the benign dataset
-    output_path -- path to the output directory
-    """
+    '''Plot the fitted truncated Cauchy distribution ccdf
+    '''
     benign_data = load_dataset(benign_data_path)
 
     plt.clf()
@@ -162,6 +156,9 @@ def main_plot_ccdf(benign_data_path, output_path):
                                                                          high=benign_data['PACKET'].max()*(1+k))
 
         temp = packet_dist.sample([100000000])
+        #temp = np.array(cauchy.rvs(loc=benign_cauchy[0]*(1+k), scale=benign_cauchy[1]*(1+k), size=1000000))
+        #temp[temp<0] = 0
+        #temp[temp>max_value] = max_value*(1+k)
         count, bins_count = np.histogram(temp, bins=num_bins)
         pdf = count / sum(count)
         ccdf = 1 - np.cumsum(pdf)
@@ -170,6 +167,7 @@ def main_plot_ccdf(benign_data_path, output_path):
     plt.xlabel('Packets Volume')
     plt.ylabel('CCDF')
     plt.semilogx()
+    #plt.semilogy()
     plt.legend()
     plt.savefig(output_path)
     # plt.show()
@@ -177,14 +175,14 @@ def main_plot_ccdf(benign_data_path, output_path):
 
 def main():
     benign_data_path = CONFIG.DATASET_DIRECTORY + 'N_BaIoT/SimpleHome_XCS7_1003_WHT_Security_Camera_benign_aggregation_Source-IP_time_window_10-sec_stat_Number.csv'
-
+    # main_fit(benign_data_path)
     main_fit_cauchy(benign_data_path)
 
-    output_path = CONFIG.OUTPUT_DIRECTORY + 'N_BaIoT/Output/Plot/pdf.png'
+    output_path = CONFIG.OUTPUT_DIRECTORY + 'N_BaIoT/Plot/pdf.png'
     prepare_output_directory(output_path)
     main_plot_pdf(benign_data_path, output_path)
 
-    output_path = CONFIG.OUTPUT_DIRECTORY + 'N_BaIoT/Output/Plot/ccdf.png'
+    output_path = CONFIG.OUTPUT_DIRECTORY + 'N_BaIoT/Plot/ccdf.png'
     prepare_output_directory(output_path)
     main_plot_ccdf(benign_data_path, output_path)
 

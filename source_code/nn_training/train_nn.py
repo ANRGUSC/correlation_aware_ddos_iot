@@ -162,9 +162,6 @@ def autoencoder(input_shape):
     model.add(tf.keras.layers.BatchNormalization())
     model.add(tf.keras.layers.Dense(input_shape, activation='relu'))
 
-
-    #encoder_model = encoder(input_shape)
-    #autoencoder_model = decoder(input_shape, encoder_model)
     model.compile(loss='mse', optimizer='adam', metrics=[tf.keras.metrics.Accuracy()], run_eagerly=True)
     model.summary()
     return model
@@ -209,10 +206,11 @@ def trans_encoder(inputs, head_size, n_heads, ff_dim, drop=0.0):
     return x + res
 
 
-def create_nn_model(nn_model, architecture, input_shape, output_shape, l2_regularizer_val, output_bias=None):
+def create_nn_model(nn_model, architecture, input_shape, output_shape, output_bias=None):
     if output_bias is not None:
         output_bias = tf.keras.initializers.Constant(output_bias)
 
+    l2_regularizer_val = 0
     model = tf.keras.Sequential()
     optimizer = 'adam'
     if nn_model == 'dense':
@@ -247,7 +245,6 @@ def create_nn_model(nn_model, architecture, input_shape, output_shape, l2_regula
         model = tf.keras.Sequential()
         model.add(tf.keras.layers.LSTM(4, activation='tanh', input_shape=input_shape,
                                        kernel_regularizer=tf.keras.regularizers.l2(l2_regularizer_val)))
-        # model.add(tf.keras.layers.Dropout(0.25))
         model.add(tf.keras.layers.Dense(output_shape, activation='sigmoid', bias_initializer=output_bias))
     elif nn_model == 'aen':
         model.add(tf.keras.layers.Dense(256, input_shape=(input_shape,), activation='relu', trainable=False))
@@ -376,7 +373,7 @@ def setup_callbacks(saved_model_path):
     # prepare_output_directory(tensorboard_path)
     # tensorboard = tf.keras.callbacks.TensorBoard(log_dir= tensorboard_path, histogram_freq=1)
 
-    # callbacks = [cp_1, cp_2, cp_3, cp_4, cp_5, cp_6, cp_7, csv_logger, tensorboard]
+    # callbacks = [cp_1, cp_2, cp_3, cp_4, cp_5, cp_6, cp_7, csv_logger, ClearMemory(), tensorboard]
     callbacks = [cp_1, cp_2, cp_3, cp_4, cp_5, cp_6, cp_7, csv_logger, ClearMemory()]
     return callbacks
 
@@ -399,7 +396,7 @@ def plot_logs(logs_path, output_path):
             continue
         plt.clf()
         plt.plot(logs['epoch'], logs[metric], label='Train')
-        # plt.plot(logs['epoch'], logs['val_'+metric], label='Validation')
+        plt.plot(logs['epoch'], logs['val_'+metric], label='Validation')
         plt.xlabel('Epoch Number')
         plt.ylabel(metric)
         plt.title(metric + ' vs epoch')
@@ -407,8 +404,8 @@ def plot_logs(logs_path, output_path):
         plt.savefig(output_path + metric + '.png')
 
 
-def main_plot_logs(metadata_metric, nn_model, architecture, run_number):
-    all_saved_models_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/' + 'metadata_' + metadata_metric + '/' +\
+def main_plot_logs(metadata_metric, nn_model, architecture, run_number, group_number):
+    all_saved_models_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/group_' + str(group_number) + '/metadata_' + metadata_metric + '/' +\
                         nn_model + '/' + architecture + '/' + 'run_' + str(run_number) + '/saved_model/*'
     for directory in glob.glob(all_saved_models_path):
         print(directory)
@@ -421,7 +418,7 @@ def main_plot_logs(metadata_metric, nn_model, architecture, run_number):
 def main_train_model(nn_model, architecture, use_time_hour, use_onehot, upsample_enabled, train_dataset_path,
                      validation_dataset_path, time_window, num_labels, epochs, batch_size,
                      use_metadata, metadata_path, metadata_metric, num_selected_nodes_for_correlation,
-                     l2_regularizer_val, run_number):
+                     run_number, group_number):
     seed = 1
     tf.random.set_seed(seed)
     random.seed(seed)
@@ -429,7 +426,7 @@ def main_train_model(nn_model, architecture, use_time_hour, use_onehot, upsample
     train_dataset_all = load_dataset(train_dataset_path)
     validation_dataset_all = load_dataset(validation_dataset_path)
 
-    model_output_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/' + 'metadata_' + metadata_metric + '/' +\
+    model_output_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/group_' + str(group_number) + '/metadata_' + metadata_metric + '/' +\
                         nn_model + '/' + architecture + '/' + 'run_' + str(run_number) + '/saved_model/'
     prepare_output_directory(model_output_path)
 
@@ -453,7 +450,8 @@ def main_train_model(nn_model, architecture, use_time_hour, use_onehot, upsample
             validation_dataset = validation_dataset_all
 
         selected_nodes_for_correlation = list(train_dataset_all['NODE'].unique())
-        if architecture == 'multiple_models_with_correlation' and use_metadata is True:
+        if (architecture == 'multiple_models_with_correlation') and (use_metadata is True) and (
+            num_selected_nodes_for_correlation < len(selected_nodes_for_correlation)):
             selected_nodes_for_correlation = [node]
             if metadata_metric == 'RANDOM':
                 rest_of_the_nodes = list(train_dataset_all['NODE'].unique())
@@ -503,22 +501,18 @@ def main_train_model(nn_model, architecture, use_time_hour, use_onehot, upsample
                             num_labels, time_window, scaler_save_path, scaler, use_time_hour, use_onehot, upsample_enabled)
 
         tf.keras.backend.clear_session()
-        model = create_nn_model(nn_model, architecture,input_shape, output_shape, l2_regularizer_val, initial_bias)
+        model = create_nn_model(nn_model, architecture,input_shape, output_shape, initial_bias)
         if nn_model == 'aen':
             for l1, l2 in zip(model.layers[0:10], aen_model.layers[0:10]):
                 l1.set_weights(l2.get_weights())
 
         callbacks_list = setup_callbacks(saved_model_path)
-        # print(X_train.shape)
-        # print(y_train.shape)
-        # print(X_validation.shape)
-        # print(y_validation.shape)
-        model.fit(X_train, y_train, batch_size=batch_size, # validation_data=(X_validation, y_validation),
+        model.fit(X_train, y_train, batch_size=batch_size, validation_data=(X_validation, y_validation),
                   epochs=epochs, verbose=1, callbacks=callbacks_list, class_weight=class_weight)
         model.save(saved_model_path + 'final_model')
 
 
-def main():
+def main_train(group_number):
     use_time_hour = False
     use_onehot = True
     upsample_enabled = False
@@ -526,10 +520,9 @@ def main():
     batch_size = 32
     num_labels = 1
     time_window = 10
-    train_dataset_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/train_data/train_data.csv'
-    validation_dataset_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/validation_data/validation_data.csv'
+    train_dataset_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/group_' + str(group_number) + '/train_data/train_data.csv'
+    validation_dataset_path = CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/group_' + str(group_number) + '/validation_data/validation_data.csv'
     print(sys.argv)
-    l2_regularizer_val = 0
 
     if len(sys.argv) > 1:
         nn_model = sys.argv[1]
@@ -539,19 +532,31 @@ def main():
         metadata_metric = sys.argv[5]
         num_selected_nodes_for_correlation = int(sys.argv[6])
         run_number = int(sys.argv[7])
-
+        use_time_hour = sys.argv[8] == 'True'
+        use_onehot = sys.argv[9] == 'True'
+        upsample_enabled = sys.argv[10] == 'True'
+        epochs = int(sys.argv[11])
+        batch_size = int(sys.argv[12])
+        num_labels = int(sys.argv[13])
+        time_window = int(sys.argv[14])
+        if metadata_metric == 'SHAP':
+            metadata_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/group_' + str(group_number) + \
+                            '/metadata_NOT_USED/' + nn_model + '/' + architecture + '/' + 'run_' + \
+                            str(run_number) + '/report/shap/feature_importance/feature_importance.csv'
+        else:
+            metadata_path = metadata_path.replace('Output/metadata', 'Output/group_' + str(group_number) + '/metadata')
         main_train_model(nn_model, architecture, use_time_hour, use_onehot, upsample_enabled, train_dataset_path,
                          validation_dataset_path, time_window, num_labels, epochs, batch_size,
                          use_metadata, metadata_path, metadata_metric, num_selected_nodes_for_correlation,
-                         l2_regularizer_val, run_number)
-        main_plot_logs(metadata_metric, nn_model, architecture, run_number)
+                         run_number, group_number)
+        main_plot_logs(metadata_metric, nn_model, architecture, run_number, group_number)
     else:
         nn_model_list = ['dense', 'cnn', 'lstm', 'trans', 'aen']
         architecture_list = ['multiple_models_with_correlation',
                              'multiple_models_without_correlation',
                              'one_model_with_correlation',
                              'one_model_without_correlation']
-        nn_model_list = ['aen']
+        nn_model_list = ['dense']
         architecture_list = ['multiple_models_with_correlation']
 
         # Run 1
@@ -565,41 +570,49 @@ def main():
                 main_train_model(nn_model, architecture, use_time_hour, use_onehot, upsample_enabled, train_dataset_path,
                                  validation_dataset_path, time_window, num_labels, epochs, batch_size,
                                  use_metadata, metadata_path, metadata_metric, num_selected_nodes_for_correlation,
-                                 l2_regularizer_val, run_number)
-                main_plot_logs(metadata_metric, nn_model, architecture, run_number)
-
+                                 run_number, group_number)
+                main_plot_logs(metadata_metric, nn_model, architecture, run_number, group_number)
+        sys.exit()
         # Run 2
         nn_model_list = ['lstm']
         architecture_list = ['multiple_models_with_correlation']
         use_metadata = True
-        metadata_path_list = [CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/metadata/distances.csv',
-                              CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/metadata/correlations.csv',
-                              '']
-        metadata_metric_list = ['DISTANCE', 'CORRELATION', 'RANDOM']
-        # metadata_path_list = [CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/metadata/feature_importance.csv']
-        # metadata_metric_list = ['SHAP']
+        metadata_path_list = [CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/group_' + str(group_number) + '/metadata/distances.csv',
+                              CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/group_' + str(group_number) + '/metadata/correlations.csv',
+                              '',
+                              CONFIG.OUTPUT_DIRECTORY + 'pre_process/Output/group_' + str(group_number) + '/metadata/feature_importance.csv']
+        metadata_metric_list = ['DISTANCE', 'CORRELATION', 'RANDOM', 'SHAP']
         num_random_trains = 10
-        num_selected_nodes_for_correlation = 5
-        for metadata_index in range(3):
+        num_selected_nodes_for_correlation = 3
+        for metadata_index in range(3, 4):
             metadata_path = metadata_path_list[metadata_index]
             metadata_metric = metadata_metric_list[metadata_index]
             for nn_model in nn_model_list:
                 for architecture in architecture_list:
                     if metadata_metric != 'RANDOM':
                         run_number = 0
+                        if metadata_metric == 'SHAP':
+                            metadata_path = CONFIG.OUTPUT_DIRECTORY + 'nn_training/group_' + str(group_number) + \
+                                            '/metadata_NOT_USED/' + nn_model + '/' + architecture + '/' + 'run_' + \
+                                            str(run_number) + '/report/shap/feature_importance/feature_importance.csv'
                         main_train_model(nn_model, architecture, use_time_hour, use_onehot, upsample_enabled, train_dataset_path,
                                          validation_dataset_path, time_window, num_labels, epochs, batch_size,
                                          use_metadata, metadata_path, metadata_metric,
-                                         num_selected_nodes_for_correlation, l2_regularizer_val, run_number)
-                        main_plot_logs(metadata_metric, nn_model, architecture, run_number)
+                                         num_selected_nodes_for_correlation, run_number, group_number)
+                        main_plot_logs(metadata_metric, nn_model, architecture, run_number, group_number)
                     else:
                         for run_number in range(num_random_trains):
                             main_train_model(nn_model, architecture, use_time_hour, use_onehot, upsample_enabled, train_dataset_path,
                                              validation_dataset_path, time_window, num_labels, epochs, batch_size,
                                              use_metadata, metadata_path, metadata_metric,
-                                             num_selected_nodes_for_correlation, l2_regularizer_val, run_number)
-                            main_plot_logs(metadata_metric, nn_model, architecture, run_number)
+                                             num_selected_nodes_for_correlation, run_number, group_number)
+                            main_plot_logs(metadata_metric, nn_model, architecture, run_number, group_number)
+
+
+def main(num_groups):
+    for group_number in range(num_groups):
+        main_train(group_number)
 
 
 if __name__ == '__main__':
-    main()
+    main(CONFIG.NUM_GROUPS)

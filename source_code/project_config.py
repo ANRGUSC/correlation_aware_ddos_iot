@@ -1,6 +1,9 @@
-# Before running the source code, please enter the path to the datasets directory and also a path that you want
-# to store the results.
+import math
 
-DATASET_DIRECTORY = '/home/arvin/Insync/usc_drive/Git/DDoS/correlation_aware_ddos_iot/dataset/'
-OUTPUT_DIRECTORY = '/home/arvin/Insync/usc_drive/Git/DDoS/correlation_aware_ddos_iot/Output/'
+OUTPUT_DIRECTORY = 'path_to_output_directory'
+DATASET_DIRECTORY = 'path_to_dataset_directory'
+SOURCE_CODE_DIRECTORY = 'path_to_source_code_directory'
+
+NUM_NODES = 50
+NUM_GROUPS = math.floor(4060/NUM_NODES)
 

@@ -16,17 +16,11 @@ def prepare_output_directory(output_path):
     """
 
     dir_name = str(os.path.dirname(output_path))
-    # os.system('rm -rf ' + dir_name)
-    os.system('mkdir -p ' + dir_name)
+    # os.system("rm -rf " + dir_name)
+    os.system("mkdir -p " + dir_name)
 
 
 def plot_features_benign_attack(input_dataset_path, output_path):
-    """Plot the features of the benign and attack traffic in the CIC-IDS 2017 dataset
-
-    Keyword arguments:
-    intput_dataset_path -- path to the input dataset
-    output_path -- path to the output directory
-    """
     data = pd.read_csv(input_dataset_path)
     attack_types_list = list(data[' Label'].unique())
     attack_types_list.remove('BENIGN')
@@ -76,16 +70,6 @@ def plot_features_benign_attack(input_dataset_path, output_path):
 
 
 def plot_compare_feature_benign_attack(input_dataset_path, feature, attack_type, xlabel, ylabel, output_path):
-    """Plot a specific feature of the benign and attack traffic in the CIC-IDS 2017 dataset
-
-    Keyword arguments:
-    intput_dataset_path -- path to the input dataset
-    feature -- the specific feature that we want to do the plot
-    attack_type -- the type of the attack
-    xlabel -- the label of the horizontal axis of the plot
-    ylabel -- the label of the vertical axis of the plot
-    output_path -- path to the output directory
-    """
     data = pd.read_csv(input_dataset_path)
     data_benign = data.loc[data[' Label'] == 'BENIGN']
     data_attack = data.loc[data[' Label'] == attack_type]
@@ -107,9 +91,9 @@ def plot_compare_feature_benign_attack(input_dataset_path, feature, attack_type,
 
 def main():
     input_dataset_path = CONFIG.DATASET_DIRECTORY + 'CIC_IDS2017/Wednesday-workingHours.pcap_ISCX.csv'
-    output_directory = CONFIG.OUTPUT_DIRECTORY + 'CIC_IDS2017/Output/'
+    output_directory = CONFIG.OUTPUT_DIRECTORY + 'CIC_IDS2017/'
     prepare_output_directory(output_directory)
-    # plot_features_benign_attack(input_dataset_path, output_directory)
+    plot_features_benign_attack(input_dataset_path, output_directory)
 
     output_path = output_directory + 'flow_duration.png'
     plot_compare_feature_benign_attack(input_dataset_path, ' Flow Duration', 'DoS Slowhttptest',
@@ -132,5 +116,6 @@ def main():
                                        'Mean Flow Inter Arrival Time (Seconds)', 'Probability Density', output_path)
 
 
-main()
+if __name__ == '__main__':
+    main()
 
