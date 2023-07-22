@@ -1,4 +1,4 @@
-# Correlation Aware DDoS Detection In IoT System
+# Correlation Aware DDoS Detection In IoT Systems
 
 This repository presents the source code for the Correlation-Aware Neural Networks for DDoS Attack Detection In IoT Systems paper.
 A preprint of this paper is available with this [link](https://arxiv.org/abs/2302.07982).
